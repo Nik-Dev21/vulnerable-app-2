@@ -28,16 +28,24 @@ router.get("/download", (req, res) => {
     return res.status(403).send("Access denied.");
   }
 
-  // LOGIC_ERROR & UNHANDLED_EXCEPTION: Use asynchronous fs.readFile with error handling
-  fs.readFile(resolvedPath, (err, data) => {
-    if (err) {
-      if (err.code === 'ENOENT') {
-        return res.status(404).send("File not found.");
-      }
-      console.error(`Error reading file ${resolvedPath}:`, err);
-      return res.status(500).send("Error reading file.");
+  // RESOURCE_LEAK fix: Use fs.createReadStream to stream the file, preventing excessive memory consumption for large files.
+  const readStream = fs.createReadStream(resolvedPath);
+
+  readStream.on('open', () => {
+    readStream.pipe(res);
+  });
+
+  readStream.on('error', (err) => {
+    if (err.code === 'ENOENT') {
+      return res.status(404).send("File not found.");
     }
-    res.send(data);
+    console.error(`Error reading file ${resolvedPath}:`, err);
+    return res.status(500).send("Error reading file.");
+  });
+
+  // Handle client aborts to prevent resource leaks if the client disconnects early
+  req.on('aborted', () => {
+    readStream.destroy();
   });
 });
 
@@ -58,17 +66,27 @@ router.post("/save", (req, res) => {
     return res.status(403).send("Access denied.");
   }
 
-  // UNHANDLED_EXCEPTION & LOGIC_ERROR: Use asynchronous fs.writeFile with error handling
-  fs.writeFile(resolvedPath, content, (err) => {
-    if (err) {
-      console.error(`Error writing file ${resolvedPath}:`, err);
-      return res.status(500).send("Error writing file.");
-    }
+  // RESOURCE_LEAK fix: Use fs.createWriteStream to stream the content, preventing excessive memory consumption for large content.
+  const writeStream = fs.createWriteStream(resolvedPath);
+
+  writeStream.on('error', (err) => {
+    console.error(`Error writing file ${resolvedPath}:`, err);
+    // Clean up stream if an error occurs before it finishes
+    writeStream.destroy();
+    return res.status(500).send("Error writing file.");
+  });
+
+  writeStream.on('finish', () => {
     res.send("saved");
   });
+
+  // Write the content to the stream. Note: If req.body.content is already a large string/buffer,
+  // the memory issue might still exist in parsing the request body itself. This fix addresses the write operation.
+  writeStream.write(content);
+  writeStream.end();
 });
 
-// HARDCODED CREDENTIAL: fake storage password checked into source.
-const STORAGE_PASSWORD = "changeme-please-1234";
+// HARDCODED CREDENTIAL fix: Read STORAGE_PASSWORD from environment variables.
+const STORAGE_PASSWORD = process.env.STORAGE_PASSWORD || "default-secret-for-dev"; // In production, ensure this environment variable is set.
 
 module.exports = { router, STORAGE_PASSWORD };

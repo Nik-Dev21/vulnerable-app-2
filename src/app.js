@@ -69,4 +69,10 @@ function classify(n) {
   // console.log("unreachable"); // FIX: Removed unreachable code.
 }
 
-app.listen(3000);
+app.listen(3000, (err) => { // FIX: Added error handling for app.listen to prevent unhandled exceptions.
+  if (err) {
+    console.error('Failed to start server:', err);
+    process.exit(1); // Exit the process if the server fails to start
+  }
+  console.log("Server listening on port 3000");
+});
