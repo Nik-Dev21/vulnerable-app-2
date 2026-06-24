@@ -41,6 +41,12 @@ app.get("/user", async (req, res) => { // FIX: Made the route handler 'async'.
     return res.status(400).send("Name parameter is required."); // FIX: Added input validation for the name.
   }
 
+  // FIX: Added input validation for 'name' to ensure it's a safe format, mitigating potential injection risks.
+  // Assuming 'name' should be alphanumeric with underscores. Adjust regex as per actual requirements.
+  if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+    return res.status(400).send("Invalid name format.");
+  }
+
   // FIX: Added 'await' to correctly resolve the Promise returned by getUserByName.
   // FIX: Added basic error handling for the asynchronous operation.
   try {
