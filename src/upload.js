@@ -28,6 +28,9 @@ router.get("/download", (req, res) => {
     return res.status(403).send("Access denied.");
   }
 
+  // SECURITY_MISCONFIGURATION fix: Set Content-Disposition to attachment to prevent browser execution of uploaded files (e.g., XSS).
+  res.setHeader('Content-Disposition', 'attachment; filename="' + path.basename(resolvedPath) + '"');
+
   // RESOURCE_LEAK fix: Use fs.createReadStream to stream the file, preventing excessive memory consumption for large files.
   const readStream = fs.createReadStream(resolvedPath);
 
@@ -57,12 +60,25 @@ router.post("/save", (req, res) => {
     return res.status(400).send("Filename and content are required.");
   }
 
-  const filePath = path.join(uploadsDir, name);
+  // SECURITY_MISCONFIGURATION fix: Sanitize filename to prevent dangerous characters and ensure a safe name.
+  let sanitizedName = path.basename(name); // Remove any path components
+  // Remove any characters that are not alphanumeric, underscore, dot, or hyphen
+  sanitizedName = sanitizedName.replace(/[^a-zA-Z0-9_.-]/g, '');
+  // Ensure it's not empty after sanitization
+  if (sanitizedName.length === 0) {
+    sanitizedName = 'untitled';
+  }
+  // Prevent hidden files (e.g., .htaccess) if not explicitly intended
+  if (sanitizedName.startsWith('.')) {
+    sanitizedName = '_' + sanitizedName.substring(1);
+  }
+
+  const filePath = path.join(uploadsDir, sanitizedName);
   const resolvedPath = path.resolve(filePath);
 
   // Security check: Ensure the resolved path is strictly within the uploads directory
   if (!resolvedPath.startsWith(uploadsDir + path.sep) && resolvedPath !== uploadsDir) {
-    console.warn(`Attempted path traversal for write: ${name}`);
+    console.warn(`Attempted path traversal for write: ${sanitizedName}`);
     return res.status(403).send("Access denied.");
   }
 
@@ -78,6 +94,12 @@ router.post("/save", (req, res) => {
 
   writeStream.on('finish', () => {
     res.send("saved");
+  });
+
+  // RESOURCE_LEAK fix: Handle client aborts during POST request to prevent resource leaks.
+  req.on('aborted', () => {
+    console.warn(`Client aborted POST /save for file: ${sanitizedName}`);
+    writeStream.destroy(); // Destroy the stream to release the file handle
   });
 
   // Write the content to the stream. Note: If req.body.content is already a large string/buffer,
